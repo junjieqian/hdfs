@@ -242,3 +242,11 @@ func (f *FileWriter) startNewBlock() error {
 	f.blockWriter = rpc.NewBlockWriter(f.block, f.client.namenode, f.blockSize)
 	return nil
 }
+
+func (f *FileWriter) Truncate(newLength ...uint64) error {
+	newsize := uint64(0)
+	if len(newLength) > 0 {
+		newsize = newLength[0]
+	}
+	return f.client.Truncate(f.name, newsize)
+}

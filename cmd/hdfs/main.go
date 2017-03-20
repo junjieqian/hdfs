@@ -33,6 +33,7 @@ Valid commands:
   getmerge SOURCE DEST
   put SOURCE DEST
   df [-h]
+  truncate -s SIZE FILE
 `, os.Args[0])
 
 	lsOpts = getopt.New()
@@ -74,6 +75,9 @@ Valid commands:
 	dfOpts = getopt.New()
 	dfh    = dfOpts.Bool('h')
 
+	truncateOpts = getopt.New()
+	truncateSize = truncateOpts.Int64('s', -1)
+
 	cachedClient *hdfs.Client
 	status       = 0
 )
@@ -89,6 +93,7 @@ func init() {
 	duOpts.SetUsage(printHelp)
 	getmergeOpts.SetUsage(printHelp)
 	dfOpts.SetUsage(printHelp)
+	truncateOpts.SetUsage(printHelp)
 }
 
 func main() {
@@ -142,6 +147,9 @@ func main() {
 	case "df":
 		dfOpts.Parse(argv)
 		df(*dfh)
+	case "truncate":
+		truncateOpts.Parse(argv)
+		truncate(truncateOpts.Args()[0], uint64(*truncateSize))
 	// it's a seeeeecret command
 	case "complete":
 		complete(argv)

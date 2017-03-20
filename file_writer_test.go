@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -344,4 +345,26 @@ func TestFileAppendRepeatedly(t *testing.T) {
 	bytes, err := ioutil.ReadAll(reader)
 	require.NoError(t, err)
 	assert.Equal(t, expected, string(bytes))
+}
+
+func TestFileTruncate(t *testing.T) {
+	t.Skip("Truncate not support in Hadoop-2.6")
+	client := getClient(t)
+
+	baleet(t, "/_test/create/5.txt")
+	mkdirp(t, "/_test/create")
+	writer, err := client.Create("/_test/create/5.txt")
+	require.NoError(t, err)
+
+	n, err := writer.Write([]byte("foobar"))
+	require.NoError(t, err)
+	assert.Equal(t, 6, n)
+
+	writer.Close()
+	err = writer.Truncate(3)
+	require.NoError(t, err)
+	stat, err := client.Stat("/_test/create/5.txt")
+	require.NoError(t, err)
+	time.Sleep(time.Second)
+	assert.EqualValues(t, 3, stat.Size())
 }

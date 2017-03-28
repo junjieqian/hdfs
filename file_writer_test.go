@@ -348,7 +348,9 @@ func TestFileAppendRepeatedly(t *testing.T) {
 }
 
 func TestFileTruncate(t *testing.T) {
-	t.Skip("Truncate not support in Hadoop-2.6")
+	if os.Getenv("HADOOP_DISTRO") == "cdh" {
+		t.Skip("Truncate not support in Hadoop-2.6")
+	}
 	client := getClient(t)
 
 	baleet(t, "/_test/create/5.txt")
@@ -363,6 +365,8 @@ func TestFileTruncate(t *testing.T) {
 	writer.Close()
 	err = writer.Truncate(3)
 	require.NoError(t, err)
+	time.Sleep(3 * time.Second)
+
 	stat, err := client.Stat("/_test/create/5.txt")
 	require.NoError(t, err)
 	time.Sleep(time.Second)

@@ -3,23 +3,27 @@ package hdfs
 import (
 	"os"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestTruncate(t *testing.T) {
-	t.Skip("Truncate not support in Hadoop-2.6")
+	if os.Getenv("HADOOP_DISTRO") == "cdh" {
+		t.Skip("Truncate not support in Hadoop-2.6")
+	}
 	client := getClient(t)
 
 	baleet(t, "/_test/truncate/1.txt")
 	mkdirp(t, "/_test/truncate")
 	writer, _ := client.Create("/_test/truncate/1.txt")
 	_, _ = writer.Write([]byte("foobar\nfoobar\n"))
- 	_ = writer.Close()
+	_ = writer.Close()
 
 	err := client.Truncate("/_test/truncate/1.txt", 4)
 	require.NoError(t, err)
+	time.Sleep(3 * time.Second)
 
 	stat, err := client.Stat("/_test/truncate/1.txt")
 	require.NoError(t, err)

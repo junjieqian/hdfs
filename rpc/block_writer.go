@@ -43,11 +43,11 @@ func NewBlockWriter(block *hdfs.LocatedBlockProto, namenode *NamenodeConnection,
 
 	if o := block.B.GetNumBytes(); o > 0 {
 		// The block already contains data; we are appending.
-		bw.offset = int64(o)
-		bw.append = true
+		s.offset = int64(o)
+		s.append = true
 	}
 
-	return bw
+	return s
 }
 
 // Write implements io.Writer.
@@ -110,11 +110,7 @@ func (bw *BlockWriter) Close() error {
 }
 
 func (bw *BlockWriter) connectNext() error {
-	locs, err := bw.currentPipeline()
-	if err != nil {
-		return err
-	}
-
+	locs, _ := bw.currentPipeline(false)
 	address := getDatanodeAddress(locs[0])
 
 	conn, err := net.DialTimeout("tcp", address, connectTimeout)
@@ -128,10 +124,12 @@ func (bw *BlockWriter) connectNext() error {
 	}
 
 	resp, err := readBlockOpResponse(conn)
-	if err != nil {
-		return err
-	} else if resp.GetStatus() != hdfs.Status_SUCCESS {
-		return fmt.Errorf("Error from datanode: %s (%s)", resp.GetStatus().String(), resp.GetMessage())
+	if err != nil || resp.GetStatus() != hdfs.Status_SUCCESS {
+		_, err = bw.currentPipeline(true)
+		if err != nil {
+			return fmt.Errorf("Error from datanode: %s (%s)", resp.GetStatus().String(), resp.GetMessage())
+		}
+		return nil
 	}
 
 	bw.conn = conn
@@ -139,32 +137,10 @@ func (bw *BlockWriter) connectNext() error {
 	return nil
 }
 
-func (bw *BlockWriter) Getblock() *hdfs.LocatedBlockProto {
-	return bw.block
-}
-
-func (bw *BlockWriter) currentPipeline() ([]*hdfs.DatanodeInfoProto, error) {
-	// If one datanode failed, reconstruct the pipeline.
-	var failed uint32
-	failed = 0
-
-	for _, locs := range bw.block.GetLocs() {
-		address := getDatanodeAddress(locs)
-		if _, ok := net.DialTimeout("tcp", address, connectTimeout); ok != nil {
-			failed = failed + 1
-		}
-	}
-
-	if failed > 0 {
-		failedDatanodes := make([]*hdfs.DatanodeInfoProto, 0, failed)
-		for _, loc := range bw.block.GetLocs() {
-			address := getDatanodeAddress(loc)
-			_, err := net.DialTimeout("tcp", address, connectTimeout)
-			if err != nil {
-				failedDatanodes = append(failedDatanodes, loc)
-				continue
-			}
-		}
+func (bw *BlockWriter) currentPipeline(reconstruct bool) ([]*hdfs.DatanodeInfoProto, error) {
+	if reconstruct == true {
+		failedDatanodes := make([]*hdfs.DatanodeInfoProto, 0, 1)
+		failedDatanodes = append(failedDatanodes, bw.block.GetLocs()[0])
 
 		abandonreq := &hdfs.AbandonBlockRequestProto{
 			B:       bw.block.GetB(),
@@ -189,6 +165,11 @@ func (bw *BlockWriter) currentPipeline() ([]*hdfs.DatanodeInfoProto, error) {
 		}
 
 		bw.block = resp.GetBlock()
+
+		err = bw.connectNext()
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	return bw.block.GetLocs(), nil
@@ -238,7 +219,7 @@ func (bw *BlockWriter) finalizeBlock(length int64) error {
 // See: https://github.com/apache/hadoop/blob/6314843881b4c67d08215e60293f8b33242b9416/hadoop-hdfs-project/hadoop-hdfs/src/main/java/org/apache/hadoop/hdfs/server/datanode/BlockReceiver.java#L216
 // And: https://github.com/apache/hadoop/blob/6314843881b4c67d08215e60293f8b33242b9416/hadoop-hdfs-project/hadoop-hdfs/src/main/java/org/apache/hadoop/hdfs/server/datanode/fsdataset/impl/FsDatasetImpl.java#L1462
 func (bw *BlockWriter) writeBlockWriteRequest(w io.Writer) error {
-	pipeline, _ := bw.currentPipeline()
+	pipeline, _ := bw.currentPipeline(false)
 	targets := pipeline[1:]
 
 	op := &hdfs.OpWriteBlockProto{

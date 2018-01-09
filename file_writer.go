@@ -190,7 +190,7 @@ func (f *FileWriter) Close() error {
 			return err
 		}
 
-		lastBlock = f.blockWriter.Getblock().GetB()
+		lastBlock = f.block.GetB()
 	}
 
 	completeReq := &hdfs.CompleteRequestProto{

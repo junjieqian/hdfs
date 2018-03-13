@@ -76,6 +76,13 @@ func (bw *BlockWriter) Write(b []byte) (int, error) {
 
 	// TODO: handle failures, set up recovery pipeline
 	n, err := bw.stream.Write(b)
+	if err != nil {
+		err := bw.connectNext()
+		if err != nil {
+			return 0, err
+		}
+		n, err = bw.stream.Write(b)
+	}
 	bw.offset += int64(n)
 	if err == nil && blockFull {
 		err = ErrEndOfBlock

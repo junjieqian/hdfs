@@ -43,11 +43,11 @@ func NewBlockWriter(block *hdfs.LocatedBlockProto, namenode *NamenodeConnection,
 
 	if o := block.B.GetNumBytes(); o > 0 {
 		// The block already contains data; we are appending.
-		bw.offset = int64(o)
-		bw.append = true
+		s.offset = int64(o)
+		s.append = true
 	}
 
-	return bw
+	return s
 }
 
 // Write implements io.Writer.
@@ -76,6 +76,13 @@ func (bw *BlockWriter) Write(b []byte) (int, error) {
 
 	// TODO: handle failures, set up recovery pipeline
 	n, err := bw.stream.Write(b)
+	if err != nil {
+		err = bw.connectNext()
+		if err != nil {
+			return 0, err
+		}
+		n, err = bw.stream.Write(b)
+	}
 	bw.offset += int64(n)
 	if err == nil && blockFull {
 		err = ErrEndOfBlock
@@ -145,27 +152,25 @@ func (bw *BlockWriter) Getblock() *hdfs.LocatedBlockProto {
 
 func (bw *BlockWriter) currentPipeline() ([]*hdfs.DatanodeInfoProto, error) {
 	// If one datanode failed, reconstruct the pipeline.
-	var failed uint32
+	var failed int32
 	failed = 0
+	failedDatanodes := make([]*hdfs.DatanodeInfoProto, 0, 1)
 
-	for _, locs := range bw.block.GetLocs() {
-		address := getDatanodeAddress(locs)
-		if _, ok := net.DialTimeout("tcp", address, connectTimeout); ok != nil {
-			failed = failed + 1
-		}
+	loc := bw.block.GetLocs()[0]
+	address := getDatanodeAddress(loc)
+	conn, err := net.DialTimeout("tcp", address, connectTimeout)
+	if err != nil {
+		failedDatanodes = append(failedDatanodes, loc)
+		failed = failed + 1
+	} else if err = bw.writeBlockWriteRequest(conn); err != nil {
+		failedDatanodes = append(failedDatanodes, loc)
+		failed = failed + 1
+	} else if resp, err := readBlockOpResponse(conn); err != nil || resp.GetStatus() != hdfs.Status_SUCCESS {
+		failedDatanodes = append(failedDatanodes, loc)
+		failed = failed + 1
 	}
 
-	if failed > 0 {
-		failedDatanodes := make([]*hdfs.DatanodeInfoProto, 0, failed)
-		for _, loc := range bw.block.GetLocs() {
-			address := getDatanodeAddress(loc)
-			_, err := net.DialTimeout("tcp", address, connectTimeout)
-			if err != nil {
-				failedDatanodes = append(failedDatanodes, loc)
-				continue
-			}
-		}
-
+	if failed > 0{
 		abandonreq := &hdfs.AbandonBlockRequestProto{
 			B:       bw.block.GetB(),
 			Src:     proto.String(bw.src),
